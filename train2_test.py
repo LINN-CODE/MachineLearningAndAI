@@ -7,12 +7,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # ==========================================
-# 1. AUTO-ORGANIZE FOLDERS
+# 1. AUTO-ORGANIZE & SPLIT DATA
 # ==========================================
+# We define where your raw photos are and where the split versions go
 raw_dir = "raw_data"
 processed_dir = "processed_dataset"
-target_folders = ["object_1", "object_2"] # Make sure these match your actual folder names!
+target_folders = ["object_1", "object_2"]  # Ensure these match your folder names!
 
+# Step A: Create 'raw_data' and move folders if they are loose
 if not os.path.exists(raw_dir):
     os.makedirs(raw_dir)
 
@@ -21,14 +23,15 @@ for folder in target_folders:
         print(f"Moving '{folder}' into '{raw_dir}'...")
         shutil.move(folder, os.path.join(raw_dir, folder))
 
-# Only split if we haven't done it yet (saves time on re-runs)
+# Step B: Split into Train (80%), Val (10%), Test (10%)
+# We check if it exists first so we don't re-split every time we run
 if not os.path.exists(processed_dir):
     print("\nSplitting images into Train (80%), Val (10%), Test (10%)...")
     splitfolders.ratio(raw_dir, output=processed_dir, 
                        seed=42, ratio=(.8, .1, .1), group_prefix=None)
     print("✅ Data split successfully!")
 else:
-    print("✅ Data already split. Skipping split step.")
+    print("✅ Data already split. Using existing 'processed_dataset'.")
 
 # ==========================================
 # 2. GPU CHECK
@@ -63,10 +66,9 @@ class_names = train_ds.class_names
 print(f"Classes found: {class_names}")
 
 # ==========================================
-# 4. HANDLE IMBALANCE (Auto-Calculate Weights)
+# 4. HANDLE IMBALANCE (Class Weights)
 # ==========================================
-# This section counts your files and calculates weights.
-# If Dragonfruit is rare, it gets a HUGE weight.
+# This calculates how much "attention" to pay to the rare class (Dragon Fruit)
 print("\nCalculating Class Weights...")
 train_dir = os.path.join(processed_dir, "train")
 class_counts = {}
@@ -79,47 +81,46 @@ for cls in class_names:
     total_samples += count
     print(f"   -> {cls}: {count} images")
 
-# Formula: Weight = Total / (2 * Count)
-# Rare classes get higher numbers. Common classes get lower numbers.
+# Formula: Higher weight for rarer classes
 class_weights = {}
 for i, cls in enumerate(class_names):
-    weight = total_samples / (2 * class_counts[cls])
-    class_weights[i] = weight
+    if class_counts[cls] > 0:
+        weight = total_samples / (2 * class_counts[cls])
+        class_weights[i] = weight
+    else:
+        class_weights[i] = 1.0 # Fallback if empty
 
 print(f"✅ Weights Applied: {class_weights}")
-print("(Rare classes will have higher weights to force learning)")
 
-# Optimization
+# Optimize dataset speed
 train_ds = train_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
 val_ds = val_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
 
 # ==========================================
-# 5. AUGMENTATION & MODEL
+# 5. BUILD MODEL (Augmentation + Model #32)
 # ==========================================
-learning_rate = 1e-5
-l2_strength = 1e-4
+learning_rate = 1e-5  # Slow learning for precision
+l2_strength = 1e-4    # L2 Regularization
 
-# Step A: Define Augmentation Layer
-# This randomly flips/rotates images to "create" more data for the rare class
+# Define Augmentation: Rotates/Flips images to create "fake" data
 data_augmentation = tf.keras.Sequential([
     layers.RandomFlip("horizontal_and_vertical"),
-    layers.RandomRotation(0.2), # Rotate up to 20%
-    layers.RandomZoom(0.2),     # Zoom up to 20%
-    layers.RandomContrast(0.2), # Adjust lighting
+    layers.RandomRotation(0.2), # Rotate 20%
+    layers.RandomZoom(0.2),     # Zoom 20%
+    layers.RandomContrast(0.2), # Change lighting
 ])
 
 print("\nBuilding Model...")
 model = models.Sequential([
-    # Input
     layers.Input(shape=(224, 224, 3)),
     
-    # 1. ADD AUGMENTATION HERE
+    # 1. Augmentation Layer (Only active during training)
     data_augmentation,
     
-    # Rescaling
+    # 2. Normalization
     layers.Rescaling(1./255),
     
-    # CNN Blocks
+    # 3. Convolutional Blocks (with L2 Regularization)
     layers.Conv2D(32, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(l2_strength)),
     layers.MaxPooling2D((2, 2)),
     
@@ -131,12 +132,12 @@ model = models.Sequential([
     
     layers.Flatten(),
     
-    # Dense Layers
+    # 4. Dense Layers with Dropout (Prevents Overfitting)
     layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(l2_strength)),
-    layers.Dropout(0.5),
+    layers.Dropout(0.5), # Discards 50% of neurons
     
     layers.Dense(64, activation='relu'),
-    layers.Dropout(0.3),
+    layers.Dropout(0.3), # Discards 30% of neurons
     
     layers.Dense(len(class_names))
 ])
@@ -145,8 +146,10 @@ model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
               loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
               metrics=['accuracy'])
 
+model.summary()
+
 # ==========================================
-# 6. TRAIN (With Class Weights)
+# 6. TRAIN MODEL
 # ==========================================
 print("\nStarting Training...")
 
@@ -155,15 +158,16 @@ history = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs=epochs,
-    class_weight=class_weights # <--- THIS IS THE KEY FIX FOR IMBALANCE
+    class_weight=class_weights # Uses the weights calculated in Step 4
 )
 
 # ==========================================
-# 7. VISUALIZATION
+# 7. SAVE & VISUALIZE
 # ==========================================
 model.save('my_model.h5')
 print("\n✅ Model saved as 'my_model.h5'")
 
+# Plotting Side-by-Side Graphs
 acc = history.history['accuracy']
 val_acc = history.history['val_accuracy']
 loss = history.history['loss']
@@ -171,16 +175,19 @@ val_loss = history.history['val_loss']
 epochs_range = range(len(acc))
 
 plt.figure(figsize=(14, 5))
+
+# Graph 1: Accuracy
 plt.subplot(1, 2, 1)
 plt.plot(epochs_range, acc, 'bo', label='Training acc')
 plt.plot(epochs_range, val_acc, 'b', label='Validation acc')
-plt.title('Training and validation accuracy')
+plt.title('Training and Validation Accuracy')
 plt.legend(loc='lower right')
 
+# Graph 2: Loss
 plt.subplot(1, 2, 2)
 plt.plot(epochs_range, loss, 'bo', label='Training loss')
 plt.plot(epochs_range, val_loss, 'b', label='Validation loss')
-plt.title('Training and validation loss')
+plt.title('Training and Validation Loss')
 plt.legend(loc='upper right')
 
 plt.savefig('advanced_analysis.png')
