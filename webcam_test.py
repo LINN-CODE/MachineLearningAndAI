@@ -7,7 +7,7 @@ import tensorflow as tf
 # ==========================================
 # Load your trained model
 print("Loading model... (This might take a moment)")
-model = tf.keras.models.load_model('Jan_20_model.h5')
+model = tf.keras.models.load_model('Jan21_balance_model.h5')
 print("✅ Model loaded!")
 
 # Define your class names EXACTLY as they appeared in training
