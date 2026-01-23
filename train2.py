@@ -3,6 +3,7 @@ import shutil
 import splitfolders
 import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers
+from tensorflow.keras.applications import EfficientNetB0
 import matplotlib.pyplot as plt
 
 # ==========================================
@@ -51,7 +52,7 @@ print("✅ Data split successfully!")
 # 3. LOAD DATASET
 # ==========================================
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32 
+BATCH_SIZE = 16 
 
 print("\nLoading datasets...")
 
@@ -72,8 +73,8 @@ class_names = train_ds.class_names
 print(f"Classes found: {class_names}")
 
 # Optimization: Cache data in memory for speed
-train_ds = train_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-val_ds = val_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+train_ds = train_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
+val_ds = val_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
 
 # ==========================================
 # 4. AGGRESSIVE AUGMENTATION (The Anti-Color Bias Fix)
@@ -94,47 +95,47 @@ data_augmentation = tf.keras.Sequential([
 # ==========================================
 # 5. BUILD CNN MODEL
 # ==========================================
-learning_rate = 1e-4  # Slightly faster LR since dataset is balanced
+learning_rate = 1e-4  # Keep low for transfer learning
 l2_strength = 1e-4    
 
-print("\nBuilding Model...")
+print("\nDownloading and Building EfficientNetB0...")
 
+# 1. Load the base model (Pre-trained on ImageNet)
+# include_top=False removes the 1000-class classification layer
+base_model = EfficientNetB0(
+    include_top=False,
+    weights='imagenet',
+    input_shape=(224, 224, 3)
+)
+
+# 2. Freeze the base model
+# This ensures we only train your new top layers first
+base_model.trainable = False
+
+# 3. Create the final model
 model = models.Sequential([
     layers.Input(shape=(224, 224, 3)),
     
-    # Apply Augmentation (Only runs during training)
+    # Augmentation (Keep your existing strong augmentation)
     data_augmentation,
     
-    # Standardize pixels
-    layers.Rescaling(1./255),
+    # NOTE: We REMOVED layers.Rescaling(1./255) 
+    # EfficientNet expects 0-255 range inputs!
     
-    # --- Convolutional Blocks ---
-    # Block 1
-    layers.Conv2D(32, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(l2_strength)),
-    layers.MaxPooling2D((2, 2)),
+    # The Pre-trained Base
+    base_model,
     
-    # Block 2
-    layers.Conv2D(64, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(l2_strength)),
-    layers.MaxPooling2D((2, 2)),
+    # Convert features to a single vector per image
+    layers.GlobalAveragePooling2D(),
     
-    # Block 3
-    layers.Conv2D(128, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(l2_strength)),
-    layers.MaxPooling2D((2, 2)),
-
-    # Block 4 (Added for deeper feature extraction on shape)
-    layers.Conv2D(256, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(l2_strength)),
-    layers.MaxPooling2D((2, 2)),
+    # Dropout to prevent overfitting
+    layers.Dropout(0.3),
     
-    layers.Flatten(),
-    
-    # --- Dense Layers ---
-    layers.Dense(256, activation='relu', kernel_regularizer=regularizers.l2(l2_strength)),
-    layers.Dropout(0.5), 
-    
-    layers.Dense(len(class_names)) # Output Layer (No Softmax needed here due to from_logits=True)
+    # Output Layer
+    layers.Dense(len(class_names)) # No softmax (logits=True in loss)
 ])
 
-# Use separate definition for loss/optimizer to avoid Mixed Precision casting issues
+# Use separate definition for loss/optimizer
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
@@ -177,7 +178,7 @@ history = model.fit(
 # ==========================================
 # 7. SAVE RESULTS
 # ==========================================
-model.save('Jan_22_model.h5') 
+model.save('Jan_23_EfficientNet_model.h5') 
 print("\n✅ Model saved as 'Jan21_balance_model.h5'")
 
 # Plotting
