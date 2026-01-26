@@ -6,7 +6,7 @@ import tensorflow as tf
 # 1. SETUP
 # ==========================================
 print("Loading model...")
-model = tf.keras.models.load_model('Jan21_balance_model.h5')
+model = tf.keras.models.load_model('Jan_23_model2.h5')
 print("✅ Model loaded!")
 
 class_names = ['object_1', 'object_2', 'unknown'] 

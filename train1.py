@@ -51,7 +51,7 @@ print("✅ Data split successfully!")
 # 3. LOAD DATASET
 # ==========================================
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32 
+BATCH_SIZE = 32
 
 print("\nLoading datasets...")
 
@@ -84,11 +84,11 @@ data_augmentation = tf.keras.Sequential([
     layers.RandomRotation(0.2),
     layers.RandomZoom(0.2),
     layers.RandomTranslation(0.1, 0.1),
-
-        
+    layers.Lambda(lambda x: tf.image.random_hue(x, 0.1)),
     # Standard lighting changes
     layers.RandomBrightness(0.2),
     layers.RandomContrast(0.2),
+    layers.Lambda(lambda x: tf.image.random_saturation(x, 0.7, 1.3))
 ])
 
 # ==========================================
@@ -177,7 +177,7 @@ history = model.fit(
 # ==========================================
 # 7. SAVE RESULTS
 # ==========================================
-model.save('Jan_22_model.h5') 
+model.save('Jan_23_model2.h5') 
 print("\n✅ Model saved as 'Jan21_balance_model.h5'")
 
 # Plotting

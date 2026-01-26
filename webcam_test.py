@@ -7,7 +7,7 @@ import tensorflow as tf
 # ==========================================
 # Load your trained model
 print("Loading model... (This might take a moment)")
-model = tf.keras.models.load_model('Jan_23_EfficientNet_model5')
+model = tf.keras.models.load_model('Jan_22_model.h5')
 print("✅ Model loaded!")
 
 # Define your class names EXACTLY as they appeared in training
@@ -20,7 +20,10 @@ IMG_SIZE = (224, 224)
 # ==========================================
 # 2. WEBCAM LOOP
 # ==========================================
+
 cap = cv2.VideoCapture(0)
+
+#cap = cv2.VideoCapture(1)
 
 if not cap.isOpened():
     print("❌ Error: Could not open webcam.")
